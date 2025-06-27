@@ -14,7 +14,8 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.impute import SimpleImputer
-from xverse.transformer import WOE
+from sklearn.feature_selection import SelectKBest, chi2
+from sklearn.ensemble import RandomForestClassifier
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -160,19 +161,6 @@ class CategoryEncoder(BaseEstimator, TransformerMixin):
             elif self.method == 'label':
                 encoder = LabelEncoder()
                 encoder.fit(X[col])
-            elif self.method == 'woe':
-                # For WOE, we first need to convert categorical to numeric using label encoding
-                label_encoder = LabelEncoder()
-                X[col] = label_encoder.fit_transform(X[col])
-                
-                encoder = WOE()
-                if y is not None:
-                    encoder.fit(X[[col]], y)
-                else:
-                    raise ValueError("Target variable required for WOE encoding")
-                
-                # Store both encoders
-                self.encoders[f"{col}_label"] = label_encoder
             
             self.encoders[col] = encoder
             
@@ -199,13 +187,6 @@ class CategoryEncoder(BaseEstimator, TransformerMixin):
             
             elif self.method == 'label':
                 X[col] = self.encoders[col].transform(X[col])
-            
-            elif self.method == 'woe':
-                # First apply label encoding
-                X[col] = self.encoders[f"{col}_label"].transform(X[col])
-                # Then apply WOE encoding
-                X[f"{col}_WOE"] = self.encoders[col].transform(X[[col]])
-                X = X.drop(columns=[col])
         
         return X
 
@@ -261,6 +242,79 @@ class DataFrameScaler(BaseEstimator, TransformerMixin):
             X[self.numeric_columns] = self.scaler.transform(X[self.numeric_columns])
         return X
 
+class FeatureSelector(BaseEstimator, TransformerMixin):
+    """Feature selection using Random Forest and Chi-squared importance"""
+    
+    def __init__(self, k=20):
+        self.k = k
+        self.selected_features = None
+        self.feature_importances = {}
+        self.rf_selector = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.chi2_selector = SelectKBest(chi2, k=self.k)
+        
+    def calculate_feature_importance(self, X, y):
+        """Calculate feature importance using multiple methods"""
+        importance_scores = {}
+        
+        # Get numeric columns only
+        numeric_cols = X.select_dtypes(include=['int64', 'float64']).columns
+        if len(numeric_cols) == 0:
+            raise ValueError("No numeric columns available for feature selection")
+        
+        X_numeric = X[numeric_cols]
+        
+        # Ensure all values are non-negative for chi-squared test
+        X_chi2 = X_numeric - X_numeric.min() + 1e-6
+        
+        # Random Forest importance
+        self.rf_selector.fit(X_numeric, y)
+        rf_importance = pd.Series(self.rf_selector.feature_importances_, index=numeric_cols)
+        importance_scores['random_forest'] = rf_importance
+        
+        # Chi-squared importance
+        chi2_scores = chi2(X_chi2, y)[0]
+        chi2_importance = pd.Series(chi2_scores, index=numeric_cols)
+        importance_scores['chi2'] = chi2_importance
+        
+        return importance_scores
+    
+    def select_features(self, importance_scores):
+        """Select top k features based on combined importance"""
+        # Normalize each importance score
+        normalized_scores = {}
+        for method, scores in importance_scores.items():
+            if scores.max() > 0:
+                normalized_scores[method] = scores / scores.max()
+            else:
+                normalized_scores[method] = scores
+        
+        # Calculate combined importance
+        combined_importance = sum(normalized_scores.values())
+        
+        # Select top k features
+        k = min(self.k, len(combined_importance))
+        self.selected_features = combined_importance.nlargest(k).index.tolist()
+        
+        return self.selected_features
+    
+    def fit(self, X, y=None):
+        if y is None:
+            raise ValueError("Target variable is required for feature selection")
+        
+        # Calculate feature importance using multiple methods
+        self.feature_importances = self.calculate_feature_importance(X, y)
+        
+        # Select features
+        self.selected_features = self.select_features(self.feature_importances)
+        
+        return self
+    
+    def transform(self, X):
+        if self.selected_features is None:
+            raise ValueError("You must call fit before transform")
+        
+        return X[self.selected_features]
+
 def create_feature_pipeline(categorical_method='onehot'):
     """Create the main feature engineering pipeline"""
     
@@ -278,7 +332,10 @@ def create_feature_pipeline(categorical_method='onehot'):
         ('category_encoder', CategoryEncoder(method=categorical_method)),
         
         # Scale numerical features while preserving DataFrame format
-        ('scaler', DataFrameScaler())
+        ('scaler', DataFrameScaler()),
+        
+        # Apply feature selection
+        ('feature_selector', FeatureSelector(k=20))
     ])
     
     return pipeline
@@ -298,6 +355,14 @@ def save_metadata(pipeline, output_dir):
             },
             "categorical_features": {
                 "columns": FEATURE_GROUPS["categorical_features"]
+            },
+            "feature_selection": {
+                "n_selected_features": len(pipeline.named_steps['feature_selector'].selected_features),
+                "selected_features": pipeline.named_steps['feature_selector'].selected_features,
+                "importance_scores": {
+                    method: scores.to_dict() 
+                    for method, scores in pipeline.named_steps['feature_selector'].feature_importances.items()
+                }
             }
         },
         "creation_timestamp": datetime.now().isoformat(),
@@ -316,9 +381,18 @@ def process_and_save_data(data, output_dir, target=None, categorical_method='one
     rfm_data = data[FEATURE_GROUPS["id_columns"] + FEATURE_GROUPS["rfm_base_features"]].copy()
     rfm_data.to_csv(os.path.join(output_dir, 'raw_for_rfm.csv'), index=False)
     
+    # Extract target variable (FraudResult) for feature selection if not provided
+    if target is None and 'FraudResult' in data.columns:
+        target = data['FraudResult']
+        data = data.drop('FraudResult', axis=1)
+    
     # Process features
     pipeline = create_feature_pipeline(categorical_method=categorical_method)
     processed_data = pipeline.fit_transform(data, target)
+    
+    # Add back target variable if it was present
+    if target is not None:
+        processed_data['FraudResult'] = target
     
     # Save processed features
     processed_data.to_csv(os.path.join(output_dir, 'features.csv'), index=False)

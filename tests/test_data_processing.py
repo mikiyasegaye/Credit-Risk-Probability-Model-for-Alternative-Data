@@ -47,7 +47,8 @@ def sample_data():
         'SubscriptionId': np.random.randint(1, 6, 100),  # 5 unique subscriptions
         'TransactionId': range(1, 101),
         'BatchId': np.random.randint(1, 21, 100),
-        'AccountId': np.random.randint(1, 11, 100)
+        'AccountId': np.random.randint(1, 11, 100),
+        'FraudResult': np.random.randint(0, 2, 100)  # Binary target for testing
     }
     
     return pd.DataFrame(data)
@@ -118,33 +119,12 @@ def test_category_encoder_label(sample_data):
         # Values should be numeric
         assert pd.api.types.is_numeric_dtype(result[col])
 
-def test_category_encoder_woe(sample_data):
-    """Test the CategoryEncoder with Weight of Evidence encoding"""
-    # Create binary target for testing
-    target = np.random.randint(0, 2, len(sample_data))
-    
-    # Apply transformation
-    categorical_cols = FEATURE_GROUPS['categorical_features']
-    transformer = CategoryEncoder(categorical_columns=categorical_cols, method='woe')
-    result = transformer.fit_transform(sample_data, target)
-    
-    # Check if categorical columns were encoded
-    for col in categorical_cols:
-        # Original column should be dropped
-        assert col not in result.columns
-        # WOE column should exist
-        assert f"{col}_WOE" in result.columns
-        # Values should be numeric
-        assert result[f"{col}_WOE"].dtype == 'float64'
-
 def test_process_and_save_data(sample_data, temp_output_dir):
     """Test the complete data processing pipeline and file outputs"""
     # Process data with different encoding methods
-    for method in ['onehot', 'label', 'woe']:
-        # Create binary target for WOE encoding
-        target = np.random.randint(0, 2, len(sample_data)) if method == 'woe' else None
-        
-        # Process the data
+    for method in ['onehot', 'label']:
+        # Process the data with target variable
+        target = sample_data['FraudResult']
         result = process_and_save_data(sample_data, temp_output_dir, target=target, categorical_method=method)
         
         # Check if result is a DataFrame
