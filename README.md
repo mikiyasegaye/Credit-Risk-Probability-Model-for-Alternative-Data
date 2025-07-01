@@ -1,5 +1,5 @@
 ---
-# Credit Risk Modeling – Task 1
+# Credit Risk Probability Model for Alternative Data
 
 ## Overview
 
@@ -37,8 +37,8 @@ This project is part of the 10 Academy Artificial Intelligence Mastery challenge
 1. **Clone the repository**
 
 ```bash
-   git clone https://github.com/your-username/credit-risk-model.git
-   cd credit-risk-model
+   git clone https://github.com/mikiyasegaye/Credit-Risk-Probability-Model-for-Alternative-Data.git
+   cd Credit-Risk-Probability-Model-for-Alternative-Data
 ```
 
 2. **Set up Python environment**
@@ -67,7 +67,7 @@ This project is part of the 10 Academy Artificial Intelligence Mastery challenge
 
 ## Credit Scoring Business Understanding
 
-### 1. How does the Basel II Accord’s emphasis on risk measurement influence our need for an interpretable and well-documented model?
+### 1. How does the Basel II Accord's emphasis on risk measurement influence our need for an interpretable and well-documented model?
 
 The Basel II Capital Accord allows financial institutions to use internal models to estimate key credit risk parameters: Probability of Default (PD), Loss Given Default (LGD), and Exposure at Default (EAD). Under the Advanced Internal Ratings-Based (AIRB) approach, institutions gain flexibility but are also required to ensure transparency, traceability, and explainability.
 
@@ -117,6 +117,136 @@ In regulated financial settings, **simplicity and explainability are often prior
 - [Developing a Credit Risk Model – TDS](https://towardsdatascience.com/how-to-develop-a-credit-risk-model-and-scorecard-91335fc01f03)
 - [Credit Risk Explained – CFI](https://corporatefinanceinstitute.com/resources/commercial-lending/credit-risk/)
 - [Risk Officer on Credit Risk](https://www.risk-officer.com/Credit_Risk.htm)
+
+---
+
+### Model Development Process
+
+1. **Data Preprocessing and Feature Engineering**
+
+   - Transaction data cleaning and formatting
+   - Feature engineering based on transaction patterns
+   - RFM analysis for customer segmentation
+
+2. **Model Training Pipeline**
+
+   - Multiple model experiments tracked in MLflow
+   - Hyperparameter optimization
+   - Model performance evaluation
+   - Best model selection and registration
+
+3. **Model Deployment**
+   - Containerized model serving
+   - RESTful API endpoints
+   - Prediction service with FastAPI
+
+### Running the Project
+
+1. **Start the Services**
+
+```bash
+# Build and start all services
+docker-compose up -d
+
+# Check service status
+docker-compose ps
+```
+
+2. **Access Points**
+
+   - MLflow UI: `http://localhost:5050`
+   - API Documentation:
+     - Swagger UI: `http://localhost:8080/docs`
+     - ReDoc: `http://localhost:8080/redoc`
+   - Health Check: `http://localhost:8080/health`
+
+3. **API Endpoints**
+
+   - `POST /predict`: Make credit risk predictions
+   - `GET /health`: Check API health status
+   - `GET /`: Get API information and version
+
+4. **Making Predictions**
+
+```bash
+curl -X POST "http://localhost:8080/predict" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "recency": 30,
+           "frequency": 10,
+           "monetary": 5000,
+           "avg_transaction_amount": 500,
+           "transaction_frequency": 0.33,
+           "customer_age": 35,
+           "customer_tenure": 365
+         }'
+```
+
+### Service Architecture
+
+The project uses a three-service architecture:
+
+1. **MLflow Server (Port 5050)**
+
+   - Experiment tracking
+   - Model versioning
+   - Model registry
+   - Artifact storage
+
+2. **Model Registration Service**
+
+   - Trains models
+   - Evaluates performance
+   - Registers best model to MLflow
+   - Automated via Docker
+
+3. **API Service (Port 8080)**
+   - FastAPI-based prediction service
+   - Loads production model from MLflow
+   - Handles real-time predictions
+   - Health monitoring
+
+### Resource Management
+
+Each service has defined resource limits:
+
+- MLflow: 1 CPU, 1GB RAM
+- Model Registration: 2 CPU, 4GB RAM
+- API Service: 2 CPU, 4GB RAM
+
+### Monitoring and Maintenance
+
+1. **Health Checks**
+
+   - API health endpoint: `http://localhost:8080/health`
+   - Docker health checks configured
+   - Automatic container restart on failure
+
+2. **Logging**
+
+   - Centralized logging for all services
+   - Performance metrics tracking
+   - Error monitoring and reporting
+
+3. **Model Updates**
+   - Automated model retraining
+   - Version control in MLflow
+   - Zero-downtime model updates
+
+### Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run specific test files
+pytest tests/test_data_processing.py
+pytest tests/test_model_interaction.py
+pytest tests/test_rfm_analysis.py
+pytest tests/test_train.py
+```
 
 ---
 
