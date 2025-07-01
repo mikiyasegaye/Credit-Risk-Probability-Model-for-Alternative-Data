@@ -1,0 +1,87 @@
+services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: mlflow.Dockerfile
+    container_name: mlflow_server
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./mlflow_data/artifacts:/mlflow/artifacts
+      - ./mlflow_data/db:/mlflow
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  model_registration:
+    build:
+      context: .
+      dockerfile: model_registration.Dockerfile
+    container_name: model_registration_container
+    environment:
+      - PYTHONPATH=/app
+      - MLFLOW_TRACKING_URI=http://mlflow:5050
+      - MLFLOW_ARTIFACT_ROOT=/mlflow/artifacts
+    volumes:
+      - ./mlflow_data/artifacts:/mlflow/artifacts
+      - ./data:/app/data
+    command: >
+      sh -c "python src/train.py &&
+             python scripts/register_best_model.py"
+    depends_on:
+      mlflow:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api_container
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONPATH=/app
+      - PORT=8080
+      - MLFLOW_TRACKING_URI=http://mlflow:5050
+      - MLFLOW_ARTIFACT_ROOT=/mlflow/artifacts
+      - WORKERS=4
+      - TIMEOUT=120
+      - WORKER_CLASS=uvicorn.workers.UvicornWorker
+    volumes:
+      - ./mlflow_data/artifacts:/mlflow/artifacts
+      - ./data:/app/data
+    depends_on:
+      model_registration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+
+volumes:
+  mlflow_data:
